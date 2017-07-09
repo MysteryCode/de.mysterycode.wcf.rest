@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<data xmlns="http://www.woltlab.com" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.woltlab.com http://www.woltlab.com/XSD/maelstrom/option.xsd">
+	<import>
+		<categories>
+			<category name="general.system.rest">
+				<parent>general.system</parent>
+			</category>
+		</categories>
+		<options>
+			<option name="api_rest_auth">
+				<categoryname>general.system.rest</categoryname>
+				<optiontype>boolean</optiontype>
+				<defaultvalue>1</defaultvalue>
+			</option>
+			<option name="api_rest_auth_username">
+				<categoryname>general.system.rest</categoryname>
+				<optiontype>text</optiontype>
+				<hidden>1</hidden>
+			</option>
+			<option name="api_rest_auth_password">
+				<categoryname>general.system.rest</categoryname>
+				<optiontype>text</optiontype>
+				<hidden>1</hidden>
+			</option>
+		</options>
+	</import>
+</data>
