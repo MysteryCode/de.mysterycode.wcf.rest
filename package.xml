@@ -29,6 +29,6 @@
 		<instruction type="option" />
 
 		<!-- script -->
-		<instruction type="script" />
+		<instruction type="script">acp/install_de.mysterycode.wcf.rest_1.0.0.php</instruction>
 	</instructions>
 </package>

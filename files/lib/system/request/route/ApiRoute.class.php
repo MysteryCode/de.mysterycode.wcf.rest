@@ -21,7 +21,10 @@ class ApiRoute extends DynamicRequestRoute {
 		
 		$requestURL = FileUtil::removeLeadingSlash(FileUtil::removeTrailingSlash($requestURL));
 		
-		if ($requestURL == 'api') return true;
+		if ($requestURL == 'api') {
+			$this->setRouteData();
+			return true;
+		}
 		
 		$pattern = '/
 			api\/
@@ -47,10 +50,7 @@ class ApiRoute extends DynamicRequestRoute {
 				'method' => empty($components[3]) ? null : $components[3],
 				'parameters' => empty($components[4]) ? null : $components[4]
 			];
-			$this->routeData['isDefaultController'] = 0;
-			$this->routeData['controller'] = 'api';
-			$this->routeData['pageType'] = 'system';
-			$this->routeData['className'] = ApiAction::class;
+			$this->setRouteData();
 			
 			return true;
 		}
@@ -64,5 +64,15 @@ class ApiRoute extends DynamicRequestRoute {
 	public function canHandle(array $components) {
 		// this route cannot build routes, it is a one-way resolver
 		return false;
+	}
+	
+	/**
+	 * Sets the route data
+	 */
+	protected function setRouteData() {
+		$this->routeData['isDefaultController'] = 0;
+		$this->routeData['controller'] = 'api';
+		$this->routeData['pageType'] = 'system';
+		$this->routeData['className'] = ApiAction::class;
 	}
 }
