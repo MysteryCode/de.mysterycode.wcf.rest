@@ -1,10 +1,18 @@
 <?php
 
 use wcf\system\WCF;
+use wcf\util\CryptoUtil;
+use wcf\util\exception\CryptoException;
 use wcf\util\StringUtil;
 
-$username = StringUtil::getHash(StringUtil::getRandomID());
-$password = StringUtil::getRandomID();
+$username = StringUtil::getHash(StringUtil::getRandomID()) . '-' . StringUtil::getUUID();
+try {
+	$password = CryptoUtil::randomBytes(36);
+}
+catch (CryptoException $e) {
+	$password = StringUtil::getUUID();
+}
+
 $sql = "UPDATE	wcf".WCF_N."_option
 	SET	optionValue = ?
 	WHERE	optionName = ?";

@@ -19,7 +19,7 @@
 			</option>
 			<option name="api_rest_auth_password">
 				<categoryname>general.system.rest</categoryname>
-				<optiontype>text</optiontype>
+				<optiontype>textarea</optiontype>
 				<hidden>1</hidden>
 			</option>
 		</options>
