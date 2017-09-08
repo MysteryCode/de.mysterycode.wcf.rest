@@ -7,7 +7,7 @@ use wcf\util\StringUtil;
 
 $username = StringUtil::getHash(StringUtil::getRandomID()) . '-' . StringUtil::getUUID();
 try {
-	$password = CryptoUtil::randomBytes(36);
+	$password = bin2hex(CryptoUtil::randomBytes(36));
 }
 catch (CryptoException $e) {
 	$password = StringUtil::getUUID();
