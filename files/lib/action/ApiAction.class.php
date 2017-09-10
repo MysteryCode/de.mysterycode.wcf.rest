@@ -448,8 +448,8 @@ class ApiAction extends AbstractAction {
 		if (empty($this->authData['username'])) throw new AJAXException('username for API-authemtication is missing', AJAXException::MISSING_PARAMETERS);
 		if (empty($this->authData['password'])) throw new AJAXException('password for API-authemtication is missing', AJAXException::MISSING_PARAMETERS);
 		
-		if (CryptoUtil::secureCompare($this->authData['username'], $user)) throw new AJAXException('username for API-authentication is invalid', AJAXException::BAD_PARAMETERS);
-		if (CryptoUtil::secureCompare($this->authData['password'], $password)) throw new AJAXException('password for API-authentication is invalid', AJAXException::BAD_PARAMETERS);
+		if (!CryptoUtil::secureCompare($this->authData['username'], $user)) throw new AJAXException('username for API-authentication is invalid', AJAXException::BAD_PARAMETERS);
+		if (!CryptoUtil::secureCompare($this->authData['password'], $password)) throw new AJAXException('password for API-authentication is invalid', AJAXException::BAD_PARAMETERS);
 	}
 	
 	/**
