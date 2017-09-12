@@ -7,6 +7,8 @@ use wcf\data\DatabaseObject;
 use wcf\data\DatabaseObjectDecorator;
 use wcf\data\DatabaseObjectEditor;
 use wcf\data\DatabaseObjectList;
+use wcf\data\language\Language;
+use wcf\data\session\SessionEditor;
 use wcf\data\user\User;
 use wcf\data\user\UserProfile;
 use wcf\system\event\EventHandler;
@@ -16,11 +18,21 @@ use wcf\system\exception\PermissionDeniedException;
 use wcf\system\exception\UserInputException;
 use wcf\system\request\RouteHandler;
 use wcf\system\SingletonFactory;
+use wcf\system\user\authentication\DefaultUserAuthentication;
+use wcf\system\user\authentication\EmailUserAuthentication;
+use wcf\system\user\authentication\IUserAuthentication;
+use wcf\system\WCF;
 use wcf\util\ArrayUtil;
 use wcf\util\CryptoUtil;
 use wcf\util\JSON;
 use wcf\util\StringUtil;
 
+/**
+ * @author	Florian Gail
+ * @copyright	2017 Florian Gail <https://www.mysterycode.de>
+ * @license	GNU Lesser General Public License <http://www.gnu.org/licenses/lgpl-3.0.txt>
+ * @package	de.codequake.wcf.rest
+ */
 class ApiAction extends AbstractAction {
 	/**
 	 * @var mixed[]
@@ -33,15 +45,31 @@ class ApiAction extends AbstractAction {
 	protected $blacklist = [];
 	
 	/**
+	 * @var mixed[][]
+	 */
+	protected $excludedProps = [];
+	
+	/**
 	 * @var string[]
 	 */
 	protected $authData = [];
 	
 	/**
+	 * @var \wcf\system\session\SessionHandler
+	 */
+	protected $initSession = null;
+	
+	/**
 	 * @inheritDoc
 	 */
 	public function execute() {
+		WCF::getSession()->disableTracking();
+		
 		$this->auth();
+		
+		$this->initSession = WCF::getSession();
+		
+		$this->login();
 		
 		$this->initBlacklist();
 		
@@ -76,6 +104,10 @@ class ApiAction extends AbstractAction {
 		
 		EventHandler::getInstance()->fireAction($this, 'readApiArray', $api);
 		
+		//$this->debug['request'] = ArrayUtil::trim($_REQUEST);
+		//$this->debug['cookie'] = ArrayUtil::trim($_COOKIE);
+		//$this->debug['server'] = ArrayUtil::trim($_SERVER);
+		
 		switch (strtolower($_SERVER['REQUEST_METHOD'])) {
 			case "get":
 				$this->get($api);
@@ -88,15 +120,7 @@ class ApiAction extends AbstractAction {
 		
 		$this->executed();
 		
-		$output = [];
-		
-		foreach ($this->debug as $key => $item) {
-			if (is_object($item)) {
-				$output[$key] = $this->extractProps($this->debug['object']);
-			} else {
-				$output[$key] = $item;
-			}
-		}
+		$output = $this->handleData($this->debug);
 		
 		$this->beforeEncode($output);
 		
@@ -125,10 +149,17 @@ class ApiAction extends AbstractAction {
 		
 		$method = null;
 		if (!empty($api['method'])) {
-			$method = $reflectionClass->getMethod($api['method']);
+			try {
+				$method = $reflectionClass->getMethod($api['method']);
+			}
+			catch (\ReflectionException $e) {
+				throw new AJAXException($e->getMessage(), AJAXException::BAD_PARAMETERS);
+			}
 		}
 		
-		if ($reflectionClass->isSubclassOf(AbstractDatabaseObjectAction::class)) {
+		if ($reflectionClass->isSubclassOf(IUserAuthentication::class)) {
+			$this->runUserAuthentication($api, $reflectionClass, $method);
+		} else if ($reflectionClass->isSubclassOf(AbstractDatabaseObjectAction::class)) {
 			$this->runAbstractDatabaseObjectAction($api, $reflectionClass, $method);
 		} else if ($reflectionClass->isSubclassOf(DatabaseObjectEditor::class)) {
 			$this->runDatabaseObjectEditor($api, $reflectionClass, $method);
@@ -293,6 +324,21 @@ class ApiAction extends AbstractAction {
 	 *
 	 * @throws \wcf\system\exception\AJAXException
 	 */
+	public function runUserAuthentication(array $api, \ReflectionClass $reflectionClass, $method = null) {
+		$this->runSingletonFactory($api, $reflectionClass, $method);
+		
+		if ($method !== null && $method->getName() == 'loginManually') {
+			$this->setUserReturnValues($this->debug['object']);
+		}
+	}
+	
+	/**
+	 * @param mixed[]           $api
+	 * @param \ReflectionClass  $reflectionClass
+	 * @param \ReflectionMethod $method
+	 *
+	 * @throws \wcf\system\exception\AJAXException
+	 */
 	protected function runSingletonFactory(array $api, \ReflectionClass $reflectionClass, $method = null) {
 		$params = [];
 		
@@ -349,6 +395,7 @@ class ApiAction extends AbstractAction {
 			if ($object === null || !$object->$indexColumn) throw new AJAXException('parameter id (' . $indexColumn . ') is missing or invalid', AJAXException::BAD_PARAMETERS);
 		} else if ($reflectionClass->isSubclassOf(DatabaseObjectDecorator::class)) {
 			$this->runDatabaseObjectDecorator($api, $reflectionClass, $method);
+			return;
 		} else {
 			$object = new $api['className']();
 		}
@@ -393,6 +440,8 @@ class ApiAction extends AbstractAction {
 	 * @param mixed[]           $api
 	 * @param \ReflectionClass  $reflectionClass
 	 * @param \ReflectionMethod $method
+	 *
+	 * @throws \wcf\system\exception\AJAXException
 	 */
 	protected function beforeOutput(array $api, \ReflectionClass $reflectionClass, $method = null) {
 		if (!empty($api['objectDecoratorClassName'])) {
@@ -434,6 +483,74 @@ class ApiAction extends AbstractAction {
 		}
 		
 		EventHandler::getInstance()->fireAction($this, 'beforeEncode', $output);
+	}
+	
+	/**
+	 * Loggs a user in - or tries it
+	 */
+	protected function login() {
+		$skip = false;
+		$user = null;
+		
+		if (!empty($_REQUEST['login']['sessionID']) && !empty($_REQUEST['login']['securityToken'])) {
+			WCF::getSession()->delete();
+			WCF::getSession()->load(SessionEditor::class, StringUtil::trim($_REQUEST['login']['sessionID']));
+			if (!WCF::getSession()->checkSecurityToken(StringUtil::trim($_REQUEST['login']['securityToken']))) {
+				WCF::getSession()->initSession();
+			} else {
+				$skip = true;
+				$this->setUserReturnValues($user, true);
+			}
+		}
+		
+		if (!$skip && !empty($_REQUEST['login']['username']) && !empty($_REQUEST['login']['password'])) {
+			$user = DefaultUserAuthentication::getInstance()->loginManually(StringUtil::trim($_REQUEST['login']['username']), StringUtil::trim($_REQUEST['login']['password']));
+			if ($user !== null && $user->userID) {
+				$this->setUserReturnValues($user);
+			} else {
+				$user = null;
+			}
+		} else if (!$skip && !empty($_REQUEST['login']['email']) && !empty($_REQUEST['login']['password'])) {
+			$user = EmailUserAuthentication::getInstance()->loginManually(StringUtil::trim($_REQUEST['login']['email']), StringUtil::trim($_REQUEST['login']['password']));
+			if ($user !== null && $user->userID) {
+				$this->setUserReturnValues($user);
+			} else {
+				$user = null;
+			}
+		}
+	}
+	
+	/**
+	 * Sets the user return values
+	 *
+	 * @param User $user
+	 * @param boolean $skipSessionChange
+	 */
+	protected function setUserReturnValues($user, $skipSessionChange = false) {
+		if ($user == null || !$user->userID) {
+			return;
+		}
+		
+		if (!$skipSessionChange) {
+			WCF::getSession()->changeUser($user);
+		}
+		
+		// user object
+		//$this->debug['user'] = $user;
+		
+		// user data
+		$this->debug['username'] = $user->getUsername();
+		$this->debug['groupIDs'] = $user->getGroupIDs();
+		$this->debug['languageIDs'] = $user->getLanguageIDs();
+		$this->debug['language'] = $user->getLanguage();
+		$this->debug['hasAdministrativeAccess'] = $user->hasAdministrativeAccess();
+		$this->debug['banned'] = $user->banned;
+		
+		// session data
+		$this->debug['languageID'] = WCF::getSession()->getLanguageID();
+		$this->debug['sessionID'] = WCF::getSession()->sessionID;
+		$this->debug['securityToken'] = WCF::getSession()->getSecurityToken();
+		//$this->debug['sessionCookie'] = HeaderUtil::setCookie()
 	}
 	
 	/**
@@ -482,6 +599,28 @@ class ApiAction extends AbstractAction {
 	}
 	
 	/**
+	 * Get's data ready for export
+	 *
+	 * @param mixed[] $input
+	 * @return mixed[]
+	 */
+	protected function handleData(array $input) {
+		$output = [];
+		
+		foreach ($input as $key => $item) {
+			if (is_object($item)) {
+				$output[$key] = $this->extractProps($item);
+			} else if(is_array($item)) {
+				$output[$key] = $this->handleData($item);
+			} else {
+				$output[$key] = $item;
+			}
+		}
+		
+		return $output;
+	}
+	
+	/**
 	 * Extracts the properties of an object to an array
 	 *
 	 * @param $object
@@ -492,11 +631,26 @@ class ApiAction extends AbstractAction {
 		
 		$reflection = new \ReflectionClass(get_class($object));
 		
+		if ($reflection->isSubclassOf(User::class) || $reflection->getName() == User::class) {
+			/** @var User $object */
+			$object->hasAdministrativeAccess();
+			$object->getTimeZone();
+			$object->getLanguageIDs();
+			$object->getGroupIDs();
+			$reflection = new \ReflectionClass(get_class($object));
+		}
+		
 		foreach ($reflection->getProperties() as $propKey => $property) {
 			$property->setAccessible(true);
 			
 			$value = $property->getValue($object);
 			$name = $property->getName();
+			
+			if (!empty($this->excludedProps[$reflection->getName()])) {
+				if (in_array($name, $this->excludedProps[$reflection->getName()])) {
+					continue;
+				}
+			}
 			
 			if (!empty($this->blacklist[get_class($object)]) && in_array($name, $this->blacklist[get_class($object)])) continue;
 			$cont = false;
@@ -549,7 +703,12 @@ class ApiAction extends AbstractAction {
 			DatabaseObject::class => ['databaseTableName', 'databaseTableIndexIsIdentity', 'databaseTableIndexName', 'databaseTableIndexName', 'sortOrder', 'sortBy']
 		];
 		
-		EventHandler::getInstance($this, 'initBlacklist', $this->blacklist);
+		$this->excludedProps = [
+			User::class => ['userOptions'],
+			Language::class => ['items', 'dynamicItems']
+		];
+		
+		EventHandler::getInstance()->fireAction($this, 'initBlacklist', $this->blacklist);
 	}
 	
 	/**

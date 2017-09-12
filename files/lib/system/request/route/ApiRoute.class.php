@@ -5,6 +5,12 @@ namespace wcf\system\request\route;
 use wcf\action\ApiAction;
 use wcf\util\FileUtil;
 
+/**
+ * @author	Florian Gail
+ * @copyright	2017 Florian Gail <https://www.mysterycode.de>
+ * @license	GNU Lesser General Public License <http://www.gnu.org/licenses/lgpl-3.0.txt>
+ * @package	de.codequake.wcf.rest
+ */
 class ApiRoute extends DynamicRequestRoute {
 	/**
 	 * @inheritDoc
@@ -41,7 +47,6 @@ class ApiRoute extends DynamicRequestRoute {
 			)?
 		/';
 		
-		//if (preg_match('/api\/([\D]+)(?:\/([\d]+)(?:\/([^\\/]+))?(?:\/(.*))?\/?)/', $requestURL, $components)) {
 		if (preg_match(str_replace(["\t", "\n"], '', $pattern), $requestURL, $components)) {
 			$this->routeData['api'] = [
 				'url' => $components[0],
